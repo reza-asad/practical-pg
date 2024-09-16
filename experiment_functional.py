@@ -8,20 +8,11 @@ import tqdm
 
 from bandit_environments import make_envs
 from updates import (
-    det_pg,
-    det_pg_ls,
-    det_pg_transformed_ls,
-    det_gnpg,
-    det_pg_entropy,
-    det_pg_entropy_multistage,
-)
-from updates import (
-    spg,
-    spg_gradient_step_size,
-    spg_entropy,
-    spg_entropy_multistage,
-    spg_multistage,
-    snpg,
+    mdpo_stoch,
+    mdpo,
+    smdpo_stoch,
+    smdpo,
+    smdpo_delta_dependent,
 )
 from utils import save_experiment
 
@@ -39,16 +30,8 @@ BanditData = namedtuple(
     ],
 )
 
-
-def log_data(theta, pistar, env, algo_name, optimal_action, t, run_number):
-    pi = softmax(theta)
-
+def log_data(pi, pistar, env, algo_name, optimal_action, t, run_number):
     sub_opt_gap = ((pistar - pi) @ env.mean_r).item()
-
-    if 'Deterministic' in env.name:
-        instance_number = 0
-    else:
-        instance_number = env.instance_number
     data = BanditData(
         iteration=t,
         expected_reward=(pi @ env.mean_r).item(),
@@ -56,7 +39,7 @@ def log_data(theta, pistar, env, algo_name, optimal_action, t, run_number):
         env_name=env.name,
         sub_opt_gap=sub_opt_gap,
         opt_action_pr=pi[optimal_action].item(),
-        instance_number=instance_number,
+        instance_number=env.instance_number,
         run_number=run_number,
     )
 
@@ -69,170 +52,40 @@ def run_bandit_experiment(
     print(f"{theta_0}")
     print(env.mean_r)
     # map algo_name to update and specific any additional kwargs
-    if "pg_update" in algo_name:
-        gradient_update = det_pg
-    elif "det_pg_ls" == algo_name or "det_pg_ls_increasing" == algo_name:
-        gradient_update = det_pg_ls
-        if "det_pg_ls_increasing" == algo_name:
-            eta_max_ratio = algo_kwargs.pop("r")
 
-            def det_pg_ls_step_size_update(algo_kwargs, eta):
-                if eta == algo_kwargs["eta_max"]:
-                    algo_kwargs["eta_max"] *= eta_max_ratio
-                return algo_kwargs
-
-    elif "det_pg_transformed_ls" == algo_name:
-        gradient_update = det_pg_transformed_ls
-        algo_kwargs["eta_max"] = 1 / algo_kwargs["eps"]
-
-    elif "det_gnpg" == algo_name:
-        gradient_update = det_gnpg
-    elif "det_pg_entropy" == algo_name:
-        gradient_update = det_pg_entropy
-        L_tau = 5 / 2 + algo_kwargs["tau"] * 5 * (1 + jnp.log(env.K))
-        algo_kwargs["eta"] = 1 / L_tau
-    elif "det_pg_entropy_multistage" == algo_name:
-        gradient_update = det_pg_entropy_multistage
-        stage_start = 1
-
-        w_term = lambertw(env.K - 1).real / jnp.e
-        B_4 = w_term + jnp.log(env.K)
-        L_tau = 5 / 2 + algo_kwargs["tau"] * 5 * (1 + jnp.log(env.K))
-
-        algo_kwargs['eta'] = 1 / L_tau
-
-        algo_kwargs["stage_length"] = jnp.log(
-            2 * (1 + B_4)
-        ) / (algo_kwargs['eta'] * algo_kwargs["tau"] ** algo_kwargs["p"] * algo_kwargs["B_1"])
-
-        def multistage_stage_update(algo_kwargs):
-            algo_kwargs["tau"] /= 2
-
-            L_tau = 5 / 2 + algo_kwargs["tau"] * 5 * (1 + jnp.log(env.K))
-            algo_kwargs['eta'] = 1 / L_tau
-
-            algo_kwargs["stage_length"] = jnp.log(2 * (1 + B_4)) / (
-                algo_kwargs['eta'] * algo_kwargs["tau"] ** algo_kwargs["p"] * algo_kwargs["B_1"]
-            )
-
-            return algo_kwargs
-
-    elif "spg_delta_step_size" in algo_name:
-        gradient_update = spg
-        # step-size is problem dependent
-        Delta = jnp.min(jnp.abs(env.mean_r[1:] - env.mean_r[:-1]))
-        R_max = 1
-        algo_kwargs["eta"] = Delta**2 / (40 * len(env.mean_r) ** (3 / 2) * R_max)
-    elif "spg_gradient_step_size" in algo_name:
-        gradient_update = spg_gradient_step_size
-    elif "spg_ess" in algo_name:
-        gradient_update = spg
-
-        alpha = algo_kwargs.pop("alpha")
-        eta = algo_kwargs.pop("eta_0")
-        algo_kwargs["eta"] = eta * alpha
-
-        def ess_step_size_update(algo_kwargs):
-            algo_kwargs["eta"] *= alpha
-            return algo_kwargs
-
-    elif "spg_multistage_ess" == algo_name:
-        gradient_update = spg_multistage
-        stage_start = 1
-
-        beta = algo_kwargs.pop("beta")
-        eta_0 = algo_kwargs.pop("eta_0")
-        algo_kwargs["eta"] = eta_0 * (beta / algo_kwargs["stage_length"]) ** (
-            1 / algo_kwargs["stage_length"]
-        )
-
-        def ess_step_size_update(algo_kwargs):
-            alpha = (beta / algo_kwargs["stage_length"]) ** (
-                1 / algo_kwargs["stage_length"]
-            )
-            algo_kwargs["eta"] *= alpha
-            return algo_kwargs
-
-        def multistage_stage_update(algo_kwargs):
-            algo_kwargs["stage_length"] *= 2
-
-            alpha = (beta / algo_kwargs["stage_length"]) ** (
-                1 / algo_kwargs["stage_length"]
-            )
-
-            algo_kwargs["eta"] = eta_0 * alpha
-
-            return algo_kwargs
-
-    elif "spg_entropy_ess" in algo_name:
-        gradient_update = spg_entropy
-        alpha = algo_kwargs.pop("alpha")
-        eta = algo_kwargs.pop("eta_0")
-        algo_kwargs["eta"] = eta * alpha
-
-        def ess_step_size_update(algo_kwargs):
-            algo_kwargs["eta"] *= alpha
-            return algo_kwargs
-
-    elif "spg_entropy_multistage" in algo_name:
-        gradient_update = spg_entropy_multistage
-
-        stage_start = 1
-
-        beta = algo_kwargs.pop("beta")
-        alpha = (beta / algo_kwargs["stage_length"]) ** (
-            1 / algo_kwargs["stage_length"]
-        )
-        L_tau = 5 / 2 + algo_kwargs["tau"] * 5 * (1 + jnp.log(env.K))
-        eta_0 = 1 / L_tau
-        algo_kwargs["eta"] = eta_0 * alpha
-
-        def ess_step_size_update(algo_kwargs):
-            algo_kwargs["eta"] *= (beta / algo_kwargs["stage_length"]) ** (
-                1 / algo_kwargs["stage_length"]
-            )
-            return algo_kwargs
-
-        def multistage_stage_update(algo_kwargs):
-            algo_kwargs["tau"] /= 2
-            algo_kwargs["stage_length"] *= 2
-
-            L_tau = 5 / 2 + algo_kwargs["tau"] * 5 * (1 + jnp.log(env.K))
-            eta_0 = 1 / L_tau
-
-            alpha = (beta / algo_kwargs["stage_length"]) ** (
-                1 / algo_kwargs["stage_length"]
-            )
-
-            algo_kwargs["eta"] = eta_0 * alpha
-
-            return algo_kwargs
-
-    elif "snpg_update" in algo_name:
-        gradient_update = snpg
-    elif "spg_update" in algo_name:
-        gradient_update = spg
+    if "smdpo" in algo_name:
+        if 'Deterministic' in env.name:
+            if "delta_dependent" in algo_name:
+                gradient_update = smdpo_delta_dependent
+            else:
+                gradient_update = smdpo
+        else:
+            gradient_update = smdpo_stoch
+    elif "mdpo" in algo_name:
+        if 'Deterministic' in env.name:
+            gradient_update = mdpo
+        else:
+            gradient_update = mdpo_stoch
     else:
         assert False, f"Unknown algorithm: {algo_name}"
 
     optimal_action = env.mean_r.argmax()
     pistar = jax.nn.one_hot(optimal_action, len(env.mean_r))
-
+    pi = softmax(theta_0)
+    
     log = []
     log.append(
         log_data(
-            theta_0, pistar, env, algo_name, optimal_action, t=0, run_number=run_number
+            pi, pistar, env, algo_name, optimal_action, t=0, run_number=run_number
         )
     )
 
-    theta = theta_0
-
     @jax.jit
-    def bandit_update(key, theta, **algo_kwargs):
+    def bandit_update(key, pi, **algo_kwargs):
         key, reward_key, action_key = jax.random.split(key, 3)
         reward = env.randomize(reward_key)
-        theta, eta = gradient_update(action_key, theta, reward, **algo_kwargs)
-        return key, theta, eta
+        pi, eta = gradient_update(action_key, pi, reward, **algo_kwargs)
+        return key, pi, eta
 
     @jax.jit
     def terminate_condition(theta):
@@ -245,7 +98,8 @@ def run_bandit_experiment(
     total_time = 0
     for t in tqdm.tqdm(range(1, T + 1), position=1, desc="T", leave=False):
         tik = time.time()
-        key, theta, eta = bandit_update(key, theta, **algo_kwargs)
+
+        key, pi, eta = bandit_update(key, pi, **algo_kwargs)
         elapsed_time = time.time() - tik
         total_time += elapsed_time
 
@@ -291,7 +145,7 @@ def run_bandit_experiment(
         if t % time_to_log == 0:
             log.append(
                 log_data(
-                    theta,
+                    pi,
                     pistar,
                     env,
                     algo_name,
@@ -301,11 +155,11 @@ def run_bandit_experiment(
                 )
             )
 
-    print(f"\nFinal pi: {softmax(theta)}")
+    print(f"\nFinal pi: {pi}")
     return log, total_time
 
 
-def run_experiment(
+def run_experiment_functional(
     environment_definitions,
     algos,
     T,

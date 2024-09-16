@@ -1,4 +1,6 @@
 import jax
+from absl import app, flags
+
 # opt in early to change in JAX's RNG generation
 # https://github.com/google/jax/discussions/18480
 jax.config.update("jax_threefry_partitionable", True)
@@ -7,76 +9,82 @@ jax.config.update("jax_enable_x64", True)
 # force all operations on cpu (faster for bandit experiments)
 jax.config.update("jax_platform_name", "cpu")
 
-from bandit_environments import Bandit
 from experiment import run_experiment
+from experiment_functional import run_experiment_functional
+from configs.envs_deterministic import find_envs
+from configs.algos import find_algos
 
-T = 1_000_000
-TIME_TO_LOG = T // 10
-NUM_ARMS = 10
-LOG_DIR = f"logs"
-EXP_NAME = f"bad_init"
-INTIAL_POLICY = "bad"
-NUM_INSTANCES = 50
-ENV_SEED = 1337
-EXP_SEED = 1337 + 42
+FLAGS = flags.FLAGS
 
-environment_definitions = [
-    {
-        "Bandit": Bandit,
-        "bandit_kwargs": {"K": NUM_ARMS},
-        "min_reward_gap": 0.05,
-        "max_reward_gap": 0.5,
-        "environment_name": "Deterministic (0.05)",
-    },
-    {
-        "Bandit": Bandit,
-        "bandit_kwargs": {"K": NUM_ARMS},
-        "min_reward_gap": 0.1,
-        "max_reward_gap": 0.5,
-        "environment_name": "Deterministic (0.1)",
-    },
-    {
-        "Bandit": Bandit,
-        "bandit_kwargs": {"K": NUM_ARMS},
-        "min_reward_gap": 0.2,
-        "max_reward_gap": 0.5,
-        "environment_name": "Deterministic (0.2)",
-    },
-]
+flags.DEFINE_list("env_names", 'Deterministic (0.05)', "Environment name to run")
+flags.DEFINE_list("algo_names", 'smdpo_update', "Environment name to run ")
+flags.DEFINE_string("initial_policy", "uniform", "Initial policy to use {uniform, bad}")
 
-L = 5 / 2
+flags.DEFINE_integer("t", 10**5, "Number of iterations")
+flags.DEFINE_string("exp_name", "debug", "Experiment Name")
+flags.DEFINE_string("save_dir", "./logs/", "Log directory")
+flags.DEFINE_integer("runs_per_instance", 1, "Runs per instance")
+flags.DEFINE_integer("num_instances", 10, "Number of instance")
+flags.DEFINE_integer("env_seed", 1337, "Environment Seed")
+flags.DEFINE_integer("exp_seed", 100, "Experiment Seed")
 
-algos = [
-    {
-        "algo_name": "det_pg",
-        "algo_kwargs": {"eta": 1 / L},
-    },
-    {
-        "algo_name": "det_pg_entropy",
-        "algo_kwargs": {
-            "tau": 0.1
-        },  # step-size depends on `L^tau` which requires knowledge of number of arms and is computed later
-    },
-    {
-        "algo_name": "det_pg_entropy_multistage",
-        "algo_kwargs": {
-            "tau": 0.1,
-            "p": 1,
-            "B_1": 0.01,
-        },  # step-size depends on `L^tau` which requires knowledge of number of arms and is computed in the update
-    },
-]
+# my flags
+flags.DEFINE_string("functional_update", 'True', "Use functional update")
+flags.DEFINE_float("eta", 0.001, "Step size for the update")
+flags.DEFINE_integer("num_arms", 5, "Number of arms")
 
-run_experiment(
-    environment_definitions,
-    algos,
-    T=T,
-    environment_seed=ENV_SEED,
-    experiment_seed=EXP_SEED,
-    num_instances=NUM_INSTANCES,
-    runs_per_instance=1,
-    time_to_log=TIME_TO_LOG,
-    log_dir=LOG_DIR,
-    exp_name=EXP_NAME,
-    intial_policy=INTIAL_POLICY,
-)
+def main(_):
+    FLAGS.functional_update = False if FLAGS.functional_update == 'False' else True
+
+    # load the env using json.
+    envs = find_envs(FLAGS.num_arms, FLAGS.env_names)
+    print(envs)
+
+    algos = find_algos(FLAGS.num_arms, FLAGS.t, FLAGS.algo_names)
+    
+    # concat arm number to the experiment name
+    FLAGS.exp_name = f"{FLAGS.exp_name}_arms_{FLAGS.num_arms}"
+
+    # concat initial policy to the experiment name
+    FLAGS.exp_name = f"{FLAGS.exp_name}_init_{FLAGS.initial_policy}"
+
+    # concat eta to algo name if needed.
+    if FLAGS.eta != -1:
+        for algo in algos:
+            if "eta" in algo["algo_kwargs"]:
+                algo["algo_kwargs"]["eta"] = FLAGS.eta
+            algo["algo_name"] = f"{algo['algo_name']}_eta_{FLAGS.eta}"
+    print(algos)
+
+    if FLAGS.functional_update:
+        run_experiment_functional(
+            envs,
+            algos,
+            T=FLAGS.t,
+            environment_seed=FLAGS.env_seed,
+            experiment_seed=FLAGS.exp_seed,
+            num_instances=FLAGS.num_instances,
+            runs_per_instance=FLAGS.runs_per_instance,
+            time_to_log=FLAGS.t // 100,
+            log_dir=FLAGS.save_dir,
+            exp_name=FLAGS.exp_name,
+            intial_policy=FLAGS.initial_policy,
+        )
+    else:
+        run_experiment(
+            envs,
+            algos,
+            T=FLAGS.t,
+            environment_seed=FLAGS.env_seed,
+            experiment_seed=FLAGS.exp_seed,
+            num_instances=FLAGS.num_instances,
+            runs_per_instance=FLAGS.runs_per_instance,
+            time_to_log=FLAGS.t // 100,
+            log_dir=FLAGS.save_dir,
+            exp_name=FLAGS.exp_name,
+            intial_policy=FLAGS.initial_policy,
+        )
+
+
+if __name__ in "__main__":
+    app.run(main)

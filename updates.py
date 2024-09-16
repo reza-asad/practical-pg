@@ -41,11 +41,10 @@ def transformed_armijo_line_search(f, theta, eta_max, c, beta, eps):
 @jax.jit
 def det_pg(key, theta, reward, eta):
 
-    @jax.grad
-    def df(theta):
+    def f(theta):
         return jax.nn.softmax(theta) @ reward
 
-    grad = df(theta)
+    grad = jax.grad(f)(theta)
     theta = theta + eta * grad
 
     return theta, eta
@@ -118,7 +117,8 @@ def det_pg_entropy_multistage(
 
 @jax.jit
 def spg(key, theta, reward, eta):
-    action = jax.random.categorical(key, theta)
+    pi = jax.nn.softmax(theta)
+    action = jax.random.choice(key, len(reward), p=pi)
 
     def stochastic_f(theta):
         pi = jax.lax.stop_gradient(jax.nn.softmax(theta))
@@ -191,3 +191,56 @@ def spg_entropy_multistage(key, theta, reward, eta, tau, stage_length=None):
     theta = theta + eta * jax.grad(stochastic_f)(theta)
 
     return theta, eta
+
+@jax.jit
+def snpg(key, theta, reward, eta):
+    action = jax.random.categorical(key, theta)
+    pi = jax.nn.softmax(theta)
+    # \hat{r}(a) = indicator(a = action) / pi(a) * R_t(a)
+    reward_hat = jax.nn.one_hot(action, len(reward)) / pi * reward
+
+    theta = theta + eta * reward_hat
+
+    return theta, eta
+
+@jax.jit
+def mdpo(key, pi, reward, eta):
+    pi = pi * jnp.exp(eta * reward)
+    pi = pi / pi.sum() 
+
+    return pi, eta
+
+
+@jax.jit
+def smdpo(key, pi, reward, eta):
+    grad = pi * (reward - pi.dot(reward)) 
+    pi = pi + eta * grad
+    return pi, eta
+
+@jax.jit
+def smdpo_delta_dependent(key, pi, reward):
+    sign_delta = jnp.sign(jnp.expand_dims(reward, 1) - jnp.expand_dims(reward, 0))
+    grad = pi * (sign_delta @ pi)
+    pi = pi + grad
+    return pi, None
+
+@jax.jit
+def mdpo_stoch(key, pi, reward, eta):
+    action = jax.random.choice(key, len(reward), p=pi)
+
+    reward_hat = jax.nn.one_hot(action, len(reward)) / pi * reward
+    pi = pi * jnp.exp(eta * reward_hat)
+
+    return pi, eta
+
+
+@jax.jit
+def smdpo_stoch(key, pi, reward, eta):
+    action = jax.random.choice(key, len(reward), p=pi)
+
+    reward_hat = jax.nn.one_hot(action, len(reward)) / pi * reward
+    stoch_grad = pi * (reward_hat - pi.dot(reward_hat)) 
+    pi = pi + eta * stoch_grad
+
+    return pi, eta
+
