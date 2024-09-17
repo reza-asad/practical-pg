@@ -99,6 +99,15 @@ def run_bandit_experiment(
     for t in tqdm.tqdm(range(1, T + 1), position=1, desc="T", leave=False):
         tik = time.time()
 
+        # _, reward_key, action_key = jax.random.split(key, 3)
+        # reward = env.randomize(reward_key)
+        # action = jax.random.choice(action_key, len(reward), p=pi)
+        # reward_hat = jax.nn.one_hot(action, len(reward)) / pi * reward
+        # stoch_grad = pi * (reward_hat - pi.dot(reward_hat)) 
+        # pi = pi + algo_kwargs['eta'] * stoch_grad
+        # print('pi: {}, stoch_grad: {}, reward_hat: {}'.format(pi, stoch_grad, reward_hat))
+        # print('*' * 100)
+
         key, pi, eta = bandit_update(key, pi, **algo_kwargs)
         elapsed_time = time.time() - tik
         total_time += elapsed_time

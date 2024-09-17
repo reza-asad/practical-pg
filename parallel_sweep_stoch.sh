@@ -9,10 +9,10 @@ exp_name=('constant_eta')
 t=(1000000)
 num_instances=(50)
 functional_update=('False')
-eta_list=(100 1000 10000 100000 1000000)
+eta_list=(0.001 0.01 0.1 1 10)
 num_arms_list=(2 5 10)
 
-parallel -j 14 \
+parallel -j 55 \
     OMP_NUM_THREADS=1 \
     python spg_experiments.py ::: \
     --env_names ::: ${env_names_list[@]} ::: \

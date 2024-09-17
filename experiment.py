@@ -45,10 +45,6 @@ def log_data(theta, pistar, env, algo_name, optimal_action, t, run_number):
 
     sub_opt_gap = ((pistar - pi) @ env.mean_r).item()
 
-    if 'Deterministic' in env.name:
-        instance_number = 0
-    else:
-        instance_number = env.instance_number
     data = BanditData(
         iteration=t,
         expected_reward=(pi @ env.mean_r).item(),
@@ -56,7 +52,7 @@ def log_data(theta, pistar, env, algo_name, optimal_action, t, run_number):
         env_name=env.name,
         sub_opt_gap=sub_opt_gap,
         opt_action_pr=pi[optimal_action].item(),
-        instance_number=instance_number,
+        instance_number=env.instance_number,
         run_number=run_number,
     )
 

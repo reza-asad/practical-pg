@@ -241,6 +241,6 @@ def smdpo_stoch(key, pi, reward, eta):
     reward_hat = jax.nn.one_hot(action, len(reward)) / pi * reward
     stoch_grad = pi * (reward_hat - pi.dot(reward_hat)) 
     pi = pi + eta * stoch_grad
-
+    
     return pi, eta
 

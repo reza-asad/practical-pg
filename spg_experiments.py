@@ -18,8 +18,8 @@ from configs.algos import find_algos
 FLAGS = flags.FLAGS
 
 flags.DEFINE_list("env_names", 'Gaussian (hard)', "Environment name to run")
-flags.DEFINE_list("algo_names", 'spg_update', "Environment name to run ")
-flags.DEFINE_string("initial_policy", "bad", "Initial policy to use {uniform, bad}")
+flags.DEFINE_list("algo_names", 'smdpo_update', "Environment name to run ")
+flags.DEFINE_string("initial_policy", "uniform", "Initial policy to use {uniform, bad}")
 
 flags.DEFINE_integer("t", 10**5, "Number of iterations")
 flags.DEFINE_string("exp_name", "debug", "Experiment Name")
@@ -30,9 +30,9 @@ flags.DEFINE_integer("env_seed", 1337, "Environment Seed")
 flags.DEFINE_integer("exp_seed", 100, "Experiment Seed")
 
 # my flags
-flags.DEFINE_string("functional_update", 'False', "Use functional update")
-flags.DEFINE_float("eta", 1000, "Step size for the update")
-flags.DEFINE_integer("num_arms", 10, "Number of arms")
+flags.DEFINE_string("functional_update", 'True', "Use functional update")
+flags.DEFINE_float("eta", 0.001, "Step size for the update")
+flags.DEFINE_integer("num_arms", 2, "Number of arms")
 
 
 def main(_):
